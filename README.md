@@ -63,6 +63,7 @@ npm run dev
 | 任务调度 | `scheduler` | 调度任务 | 任务编号、任务名称、调度类型 |
 | 缓存管理 | `cache` | 缓存配置 | 缓存编号、缓存目标、缓存策略 |
 | 分析管道 | `pipeline` | 分析节点 | 节点编号、输入数据集、分析算子 |
+| 批量冲销 | `writeoff` | 冲销批次 | 批次号、活动编号、结算日 |
 | 分析模型 | `model` | 模型配置 | 模型编号、模型名称、模型类型 |
 | 数据集市 | `data_mart` | 集市表 | 表编号、表名称、主题域 |
 | 数据导出 | `export` | 导出任务 | 任务编号、导出对象、导出格式 |
@@ -74,3 +75,17 @@ npm run dev
   `backend/app/routers/<模块>.py`，业务规则在 `backend/app/services/<模块>.py`。
 - 列表接口统一返回 `{ items, total, page, size }`，动作接口统一返回 `{ ok, message }`。
 - 状态流转只允许在 `app/services` 里改，路由层不做业务判断。
+
+## 分析管道 · 批量入账冲销
+
+`POST /api/pipeline/writeoff/batches` 一次提交多条冲销行（借方行号、贷方行号、源回执、
+冲销原因），按活动与结算日逐行校验后入账，并沿原流水回写数据集市（已确认净额、待补差额）。
+
+- 争用策略：同一借方行下多条有效贷方行按「源回执时间、贷方行号」顺序依次抵扣，
+  余量不足的边界行部分确认，未覆盖部分记待补差额，余量耗尽后的行挂待复核。
+- 幂等：批次号是幂等键，重复提交（含并发）只入账一次；已确认行按
+  「贷方行号 + 源回执号」去重，部分批次重送不重复影响金额。
+- 复核：`GET /api/pipeline/writeoff/failures` 列出失败项（含拒绝原因与可纠正标记），
+  `POST /api/pipeline/writeoff/restart` 多选重新开始，只处理可纠正条目。
+- 查询：`GET /api/pipeline/writeoff/batches`、`/batches/{批次号}`、`/mart-flows`、`/debit-ledger`。
+- 场景测试：`cd backend && python3 -m unittest tests.test_writeoff -v`。
